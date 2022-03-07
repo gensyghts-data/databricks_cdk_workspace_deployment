@@ -17,14 +17,15 @@ import textwrap
 
 class Databricks(Stack):
 
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+    def __init__(self,
+                 scope: Construct,
+                 construct_id: str,
+                 db_account_id: str,
+                 username: str,
+                 password: str,
+                 workspace_name: str,
+                 **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
-
-        db_account_id = #'FILLMEIN'
-        username = #'FILLMEIN'
-        password = #'FILLMEIN'
-        workspace_name = #'FILLMEIN'
-
 
         db_aws_account_id = "414351767826"
 
@@ -145,6 +146,7 @@ class Databricks(Stack):
             public_read_access=False,
             versioned=False,
             removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
         )
 
@@ -183,6 +185,7 @@ class Databricks(Stack):
             public_read_access=False,
             versioned=False,
             removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
         )
 
