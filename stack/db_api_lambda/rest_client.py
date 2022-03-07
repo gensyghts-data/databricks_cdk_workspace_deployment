@@ -114,6 +114,15 @@ def handler(event, context):
                                 )
                 responseData['StorageConfigId'] = post_result['storage_configuration_id']
 
+            if event['ResourceProperties']['action'] == 'CREATE_NETWORKS':
+                post_result = delete_networks(
+                                    event['ResourceProperties']['accountId'],
+                                    event['ResourceProperties']['network_name'],
+                                    event['ResourceProperties']['encodedbase64'],
+                                    event['ResourceProperties']['user_agent']
+                                )
+                responseData['NetworkId'] = post_result['network_id']
+
             if event['ResourceProperties']['action'] == 'CREATE_WORKSPACES':
                 post_result = delete_workspaces(
                                     event['ResourceProperties']['accountId'],
@@ -291,6 +300,25 @@ def create_networks(account_id, network_name, vpc_id, subnet_ids, security_group
 
     print('DATA - {}'.format(DATA)) 
     response = post_request(URL, DATA, encodedbase64, user_agent, version)
+    print(response)
+
+    # parse response
+    network_id = response['network_id']
+    print('network_id - {}'.format(network_id))
+    return response
+
+def delete_networks(account_id, network_name, encodedbase64, user_agent):
+
+    # first we get network config by name:
+    version = '1.1.0'
+    response = get_request(f"https://accounts.cloud.databricks.com/api/2.0/accounts/{account_id}/networks", encodedbase64, user_agent, version)
+    network_id = ''
+    for x in response:
+        if x['network_name'] == network_name:
+            network_id = x['network_id']
+    print(f"Deleting network ID: [{network_id}]")
+
+    response = delete_request(f"https://accounts.cloud.databricks.com/api/2.0/accounts/{account_id}/networks/{network_id}", {}, encodedbase64, user_agent, version)
     print(response)
 
     # parse response

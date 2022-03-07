@@ -25,6 +25,9 @@ class Databricks(Stack):
                  username: str,
                  password: str,
                  workspace_name: str,
+                 vpc_id: str,
+                 subnet_ids: str,
+                 security_group_ids: str,
                  **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
@@ -232,6 +235,22 @@ class Databricks(Stack):
             }
         )
 
+        create_network = CustomResource(
+            self,
+            "CreateNetworks",
+            service_token=api_function.function_arn,
+            properties={
+                'action': 'CREATE_NETWORKS',
+                'accountId': db_account_id,
+                'network_name': workspace_name + '-network',
+                'vpc_id': vpc_id,
+                'subnet_ids': subnet_ids,
+                'security_group_ids': security_group_ids,
+                'encodedbase64': base64.b64encode(username.encode('ascii')+b':'+password.encode('ascii')).decode(),
+                'user_agent': 'databricks-CloudFormation-API-caller'
+            }
+        )
+
         create_workspace = CustomResource(
             self,
             "CreateWorkspace",
@@ -245,7 +264,7 @@ class Databricks(Stack):
                 'credentials_id': create_credentials.get_att_string('CredentialsId'),
                 'storage_config_id': create_storage_configuration.get_att_string('StorageConfigId'),
                 'encodedbase64': base64.b64encode(username.encode('ascii')+b':'+password.encode('ascii')).decode(),
-                'network_id': '',
+                'network_id': create_network.get_att_string('NetworkId'),
                 'customer_managed_key_id': '',
                 'pricing_tier': '',
                 'hipaa_parm': '',
