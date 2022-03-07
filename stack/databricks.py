@@ -3,6 +3,7 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_s3 as s3,
     Aws,
+    BundlingOptions,
     CustomResource,
     Duration,
     RemovalPolicy,
@@ -171,129 +172,6 @@ class Databricks(Stack):
         db_bucket.add_to_resource_policy(db_bucket_policy)
 
         #####
-        # Set up copy zips lambda
-        #####
-
-        lambda_zips_bucket_id = 'gen-databricks-lambda'
-
-        lambda_zips_bucket = s3.Bucket(
-            self,
-            id=lambda_zips_bucket_id,
-            bucket_name=lambda_zips_bucket_id + f"-{Aws.ACCOUNT_ID}",
-            access_control=s3.BucketAccessControl.PRIVATE,
-            encryption=s3.BucketEncryption.S3_MANAGED,
-            public_read_access=False,
-            versioned=False,
-            removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
-            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
-        )
-
-        copier_statement1 = iam.PolicyStatement(
-            effect=iam.Effect.ALLOW,
-            actions=[
-                's3:GetObject',
-            ],
-            resources=[f"arn:{Aws.PARTITION}:s3:::databricks-prod-public-cfts/*"]
-        )
-
-        copier_statement2 = iam.PolicyStatement(
-            effect=iam.Effect.ALLOW,
-            actions=[
-                's3:GetObject',
-                's3:PutObject',
-                's3:DeleteObject',
-            ],
-            resources=[f"arn:{Aws.PARTITION}:s3:::{lambda_zips_bucket.bucket_name}/*"]
-        )
-
-        lambda_copier_policy_document = iam.PolicyDocument(statements=[
-                                                copier_statement1,
-                                                copier_statement2,
-                                            ]
-                                        )
-        copy_zips_role = iam.Role(self,
-                                  "databricks-copy-zips-role",
-                                  inline_policies={
-                                         'databricks-lambda-copier': lambda_copier_policy_document
-                                     },
-                                  assumed_by=iam.ServicePrincipal("lambda.amazonaws.com")
-                                 )
-
-        copy_zips_code = textwrap.dedent("""
-          import json
-          import logging
-          import threading
-          import boto3
-          import cfnresponse
-          def copy_objects(source_bucket, dest_bucket, prefix, objects):
-              s3 = boto3.client('s3')
-              for o in objects:
-                  key = prefix + o
-                  copy_source = {
-                      'Bucket': source_bucket,
-                      'Key': key
-                  }
-                  print('copy_source: %s' % copy_source)
-                  print('dest_bucket = %s'%dest_bucket)
-                  print('key = %s' %key)
-                  s3.copy_object(CopySource=copy_source, Bucket=dest_bucket,
-                        Key=key)
-          def delete_objects(bucket, prefix, objects):
-              s3 = boto3.client('s3')
-              objects = {'Objects': [{'Key': prefix + o} for o in objects]}
-              s3.delete_objects(Bucket=bucket, Delete=objects)
-          def timeout(event, context):
-              logging.error('Execution is about to time out, sending failure response to CloudFormation')
-              cfnresponse.send(event, context, cfnresponse.FAILED, {}, None)
-          def handler(event, context):
-              # make sure we send a failure to CloudFormation if the function
-              # is going to timeout
-              timer = threading.Timer((context.get_remaining_time_in_millis()
-                        / 1000.00) - 0.5, timeout, args=[event, context])
-              timer.start()
-              print('Received event: %s' % json.dumps(event))
-              status = cfnresponse.SUCCESS
-              try:
-                  source_bucket = event['ResourceProperties']['SourceBucket']
-                  dest_bucket = event['ResourceProperties']['DestBucket']
-                  prefix = event['ResourceProperties']['Prefix']
-                  objects = event['ResourceProperties']['Objects']
-                  if event['RequestType'] == 'Delete':
-                      delete_objects(dest_bucket, prefix, objects)
-                  else:
-                      copy_objects(source_bucket, dest_bucket, prefix, objects)
-              except Exception as e:
-                  logging.error('Exception: %s' % e, exc_info=True)
-                  status = cfnresponse.FAILED
-              finally:
-                  timer.cancel()
-                  cfnresponse.send(event, context, status, {}, None)
-        """)
-
-        copy_zips_function = lambda_.Function(
-            self,
-            "CopyZipsFunction",
-            runtime=lambda_.Runtime.PYTHON_3_8,
-            handler="index.handler",
-            code=lambda_.Code.from_inline(copy_zips_code),
-            timeout=Duration.seconds(240),
-            role=copy_zips_role
-        )
-
-        copy_zips = CustomResource(
-            self,
-            "CopyZips",
-            service_token=copy_zips_function.function_arn,
-            properties={
-                'DestBucket': lambda_zips_bucket.bucket_name,
-                'SourceBucket': 'databricks-prod-public-cfts',
-                'Prefix': '',
-                'Objects': ['functions/packages/default-cluster/lambda.zip']
-            }
-        )
-
-        #####
         # databricks workspace creation
         #####
 
@@ -311,15 +189,20 @@ class Databricks(Stack):
             "databricksApiFunction",
             runtime=lambda_.Runtime.PYTHON_3_8,
             handler="rest_client.handler",
-            code=lambda_.Code.from_bucket(
-                bucket=lambda_zips_bucket,
-                key='functions/packages/default-cluster/lambda.zip',
+            code=lambda_.Code.from_asset(
+                path='./stack/db_api_lambda',
+                bundling=BundlingOptions(
+                    image=lambda_.Runtime.PYTHON_3_8.bundling_image,
+                    command=[
+                        "bash",
+                        "-c",
+                        "pwd && ls -al && pip install -r requirements.txt -t /asset-output && cp -au . /asset-output",
+                    ],
+                ),
             ),
             timeout=Duration.seconds(900),
             role=db_function_exec_role
         )
-
-        api_function.node.add_dependency(copy_zips)
 
         create_credentials = CustomResource(
             self,
@@ -331,7 +214,7 @@ class Databricks(Stack):
                 'credentials_name': workspace_name + '-credentials',
                 'role_arn': db_x_account_role.role_arn,
                 'encodedbase64': base64.b64encode(username.encode('ascii')+b':'+password.encode('ascii')).decode(),
-                'user_agent': 'databricks-CloudFormation-Trial-inhouse-default-cluster'
+                'user_agent': 'databricks-CloudFormation-API-caller'
             }
         )
 
@@ -344,8 +227,8 @@ class Databricks(Stack):
                 'accountId': db_account_id,
                 'storage_config_name': workspace_name + '-storage',
                 's3bucket_name': db_bucket.bucket_name,
-                'encodedbase64': base64.b64encode(username.encode('ascii')+b':'+password.encode('ascii')).decode(), 
-                'user_agent': 'databricks-CloudFormation-Trial-inhouse-default-cluster'
+                'encodedbase64': base64.b64encode(username.encode('ascii')+b':'+password.encode('ascii')).decode(),
+                'user_agent': 'databricks-CloudFormation-API-caller'
             }
         )
 
@@ -361,7 +244,7 @@ class Databricks(Stack):
                 'aws_region': Aws.REGION,
                 'credentials_id': create_credentials.get_att_string('CredentialsId'),
                 'storage_config_id': create_storage_configuration.get_att_string('StorageConfigId'),
-                'encodedbase64': base64.b64encode(username.encode('ascii')+b':'+password.encode('ascii')).decode(), 
+                'encodedbase64': base64.b64encode(username.encode('ascii')+b':'+password.encode('ascii')).decode(),
                 'network_id': '',
                 'customer_managed_key_id': '',
                 'pricing_tier': '',
@@ -369,6 +252,8 @@ class Databricks(Stack):
                 'customer_name': '',
                 'authoritative_user_email': '',
                 'authoritative_user_full_name': '',
-                'user_agent': 'databricks-CloudFormation-Trial-inhouse-default-cluster'
+                'user_agent': 'databricks-CloudFormation-API-caller'
             }
         )
+
+
