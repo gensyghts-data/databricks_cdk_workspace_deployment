@@ -1,3 +1,10 @@
+#####
+#
+# Note that this extends code provided by Databricks at the following AWS S3 location:
+#     s3://databricks-prod-public-cfts/functions/packages/default-cluster/lambda.zip
+#
+#####
+
 # importing the requests library 
 import requests
 from requests.exceptions import HTTPError
