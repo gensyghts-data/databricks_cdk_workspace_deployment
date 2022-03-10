@@ -12,9 +12,9 @@ Databricks(app,
            username=os.environ['DB_USERNAME'],
            password=os.environ['DB_PASSWORD'],
            workspace_name=os.environ['DB_WORKSPACE_NAME'],
-           vpc_id=os.environ['DB_VPC_ID'],
-           subnet_ids=os.environ['DB_SUBNET_IDS'],
-           security_group_ids=os.environ['DB_SECURITY_GROUP_IDS'],
+           vpc_id=os.getenv('DB_VPC_ID',''),
+           subnet_ids=os.getenv('DB_SUBNET_IDS',''),
+           security_group_ids=os.getenv('DB_SECURITY_GROUP_IDS',''),
            )
 
 app.synth()

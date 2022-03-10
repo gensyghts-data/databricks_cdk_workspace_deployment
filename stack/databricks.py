@@ -237,21 +237,25 @@ class Databricks(Stack):
             }
         )
 
-        create_network = CustomResource(
-            self,
-            "CreateNetworks",
-            service_token=api_function.function_arn,
-            properties={
-                'action': 'CREATE_NETWORKS',
-                'accountId': db_account_id,
-                'network_name': workspace_name + '-network',
-                'vpc_id': vpc_id,
-                'subnet_ids': subnet_ids,
-                'security_group_ids': security_group_ids,
-                'encodedbase64': base64.b64encode(username.encode('ascii')+b':'+password.encode('ascii')).decode(),
-                'user_agent': 'databricks-CloudFormation-API-caller'
-            }
-        )
+        # Create a custom network config if a VPC was supplied:
+        network_id = ''
+        if vpc_id != '':
+            create_network = CustomResource(
+                self,
+                "CreateNetworks",
+                service_token=api_function.function_arn,
+                properties={
+                    'action': 'CREATE_NETWORKS',
+                    'accountId': db_account_id,
+                    'network_name': workspace_name + '-network',
+                    'vpc_id': vpc_id,
+                    'subnet_ids': subnet_ids,
+                    'security_group_ids': security_group_ids,
+                    'encodedbase64': base64.b64encode(username.encode('ascii')+b':'+password.encode('ascii')).decode(),
+                    'user_agent': 'databricks-CloudFormation-API-caller'
+                }
+            )
+            network_id = create_network.get_att_string('NetworkId')
 
         create_workspace = CustomResource(
             self,
@@ -266,7 +270,7 @@ class Databricks(Stack):
                 'credentials_id': create_credentials.get_att_string('CredentialsId'),
                 'storage_config_id': create_storage_configuration.get_att_string('StorageConfigId'),
                 'encodedbase64': base64.b64encode(username.encode('ascii')+b':'+password.encode('ascii')).decode(),
-                'network_id': create_network.get_att_string('NetworkId'),
+                'network_id': network_id,
                 'customer_managed_key_id': '',
                 'pricing_tier': '',
                 'hipaa_parm': '',
