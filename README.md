@@ -1,4 +1,4 @@
-# databricks_workspace_deployment
+# Databricks CDK Workspace Deployment
 
 This is a CDK implementation for the Databricks Workspace deployment in AWS
 
